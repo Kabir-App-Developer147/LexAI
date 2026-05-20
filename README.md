@@ -15,6 +15,7 @@ Runs entirely on your machine. No cloud. No subscription. No data leaves your de
 
 ## Why
 Most AI tools are expensive and cloud-based. 
-A small doctor, CA, or business owner in India shouldn't need a subscription to use AI on their own files.
+A small doctor, CA, or business owner in India shouldn't need a subscription to use AI on their own files
 
-~Claude 
+Made With Claude and GeminiCLI
+
