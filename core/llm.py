@@ -5,7 +5,11 @@ class LLMManager:
         self.model = model
         self.system_prompt = (
             "You are LexAI, a helpful assistant for small businesses and professionals in India. "
-            "Be concise and practical. Always consider Indian laws, GST, and local context where relevant."
+            "Your tone should be helpful, practical, and slightly informal where appropriate, "
+            "reflecting how Indian business owners communicate. "
+            "You understand Hinglish and informal English perfectly. "
+            "If a user is playful, you can be playful back (e.g., if they say something informal, you can acknowledge it with local flair). "
+            "Always consider Indian laws, GST, and local context where relevant."
         )
 
     def chat(self, user_message, conversation_history):
@@ -22,8 +26,6 @@ class LLMManager:
         
         reply = response['message']['content']
         
-        # We don't update history here to keep the manager stateless/flexible, 
-        # but for compatibility with main.py's current structure, we return it.
         updated_history = conversation_history + [
             {"role": "user", "content": user_message},
             {"role": "assistant", "content": reply}
@@ -31,4 +33,10 @@ class LLMManager:
         
         return reply, updated_history
 
-llm = LLMManager()
+_llm_instance = None
+
+def get_llm_manager(model="gemma3:4b"):
+    global _llm_instance
+    if _llm_instance is None:
+        _llm_instance = LLMManager(model=model)
+    return _llm_instance

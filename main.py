@@ -1,9 +1,10 @@
-from core.llm import llm
+from core.llm import get_llm_manager
 
 def main():
     print("LexAI - Your Local Business Assistant")
     print("Type 'quit' to exit\n")
     
+    llm = get_llm_manager()
     history = []
     
     while True:

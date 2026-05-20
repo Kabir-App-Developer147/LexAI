@@ -1,7 +1,5 @@
 import os
-import fitz
-import docx2txt
-from llama_index.core import Document
+from llama_index.core import SimpleDirectoryReader
 
 class DocumentIngestor:
     def __init__(self, data_folder="data"):
@@ -10,29 +8,24 @@ class DocumentIngestor:
             os.makedirs(self.data_folder)
 
     def load_documents(self):
-        docs = []
-        for filename in os.listdir(self.data_folder):
-            filepath = os.path.join(self.data_folder, filename)
+        """
+        Loads all documents from the data folder using SimpleDirectoryReader.
+        This is significantly more robust for .pdf and .docx files than manual 
+        parsing, as it correctly handles encoding, images, and structural 
+        metadata (like page numbers and filenames).
+        """
+        if not os.path.exists(self.data_folder) or not os.listdir(self.data_folder):
+            print(f"Warning: Data folder '{self.data_folder}' is empty.")
+            return []
             
-            try:
-                if filename.endswith(".docx"):
-                    text = docx2txt.process(filepath)
-                    docs.append(Document(text=text, metadata={"filename": filename}))
-                    
-                elif filename.endswith(".txt"):
-                    with open(filepath, "r", encoding="utf-8") as f:
-                        docs.append(Document(text=f.read(), metadata={"filename": filename}))
-                        
-                elif filename.endswith(".pdf"):
-                    pdf = fitz.open(filepath)
-                    text = ""
-                    for page in pdf:
-                        text += page.get_text()
-                    pdf.close()
-                    docs.append(Document(text=text, metadata={"filename": filename}))
-            except Exception as e:
-                print(f"Error loading {filename}: {e}")
-                
-        return docs
+        # SimpleDirectoryReader automatically detects file types and extracts metadata
+        reader = SimpleDirectoryReader(input_dir=self.data_folder)
+        return reader.load_data()
 
-ingestor = DocumentIngestor()
+_ingestor_instance = None
+
+def get_ingestor(data_folder="data"):
+    global _ingestor_instance
+    if _ingestor_instance is None:
+        _ingestor_instance = DocumentIngestor(data_folder=data_folder)
+    return _ingestor_instance
