@@ -1,50 +1,49 @@
-from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
+import chromadb
+from llama_index.core import VectorStoreIndex, Settings, StorageContext
+from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.llms.ollama import Ollama
 from llama_index.embeddings.ollama import OllamaEmbedding
-import docx2txt
+from core.ingest import ingestor
 import os
-import fitz
-from llama_index.core import Document
 
-def load_documents(data_folder="data"):
-    docs = []
-    for filename in os.listdir(data_folder):
-        filepath = os.path.join(data_folder, filename)
-        
-        if filename.endswith(".docx"):
-            text = docx2txt.process(filepath)
-            docs.append(Document(text=text, metadata={"filename": filename}))
-            
-        elif filename.endswith(".txt"):
-            with open(filepath, "r", encoding="utf-8") as f:
-                docs.append(Document(text=f.read(), metadata={"filename": filename}))
-                
-        elif filename.endswith(".pdf"):
-            pdf = fitz.open(filepath)
-            text = ""
-            for page in pdf:
-                text += page.get_text()
-            pdf.close()
-            docs.append(Document(text=text, metadata={"filename": filename}))
-            
-    return docs
+# Configuration
+DB_PATH = "./db/chroma_db"
+COLLECTION_NAME = "lexai_docs"
 
-def load_rag_engine(data_folder="data"):
+def load_rag_engine():
+    # Initialize Settings
     Settings.llm = Ollama(model="gemma3:4b", request_timeout=120.0)
     Settings.embed_model = OllamaEmbedding(model_name="nomic-embed-text")
-    
-    documents = load_documents(data_folder)
-    index = VectorStoreIndex.from_documents(documents)
-    return index.as_query_engine()
 
+    # Initialize ChromaDB
+    db = chromadb.PersistentClient(path=DB_PATH)
+    chroma_collection = db.get_or_create_collection(COLLECTION_NAME)
+    vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+    
+    # Check if index exists by checking if collection has items
+    if chroma_collection.count() > 0:
+        print("Loading existing index from ChromaDB...")
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
+        index = VectorStoreIndex.from_vector_store(
+            vector_store, storage_context=storage_context
+        )
+    else:
+        print("No existing index found. Ingesting documents...")
+        documents = ingestor.load_documents()
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
+        index = VectorStoreIndex.from_documents(
+            documents, storage_context=storage_context
+        )
+        print(f"Ingested {len(documents)} documents.")
+
+    return index.as_query_engine()
 
 def ask(engine, question):
     response = engine.query(question)
     return str(response)
 
-
 if __name__ == "__main__":
-    print("Loading documents...")
+    print("Initializing LexAI RAG Engine...")
     engine = load_rag_engine()
     print("Ready. Ask anything about your documents.\n")
     
@@ -52,5 +51,7 @@ if __name__ == "__main__":
         question = input("You: ").strip()
         if question.lower() == "quit":
             break
+        if not question:
+            continue
         answer = ask(engine, question)
         print(f"\nLexAI: {answer}\n")
