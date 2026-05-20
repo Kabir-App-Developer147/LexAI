@@ -2,3 +2,10 @@
 I was testing whether it could understand broken/informal English — which is extremely relevant for your target users. A small business owner in India might type exactly like that. And I wanted it to respond with "oye oye cappin" (internet slang, like "okay okay captain" — acknowledging you).
 Instead it got weirdly formal and apologetic, completely missing the playful intent.
 That's actually a real product bug. Your target users — small doctors, local CAs, kirana owners — will type in Hinglish, broken English, sometimes Hindi transliterated. If LexAI responds like a confused corporate chatbot every time, it fails its core audience. - Claude
+
+*Second glitch 
+ in llm.py at the bottom:
+pythonllm = LLMManager()
+And in ingest.py:
+pythoningestor = DocumentIngestor()
+These create instances at import time. When another file does from core.ingest import ingestor, it immediately creates a DocumentIngestor object. For now it's fine, but it'll cause problems later. Use lazy initialization instead
