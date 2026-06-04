@@ -12,3 +12,10 @@ These create instances at import time. When another file does from core.ingest i
 
 IMPORVE
 If you haven't already, look into RAG (Retrieval-Augmented Generation) operating strictly on local SQLite or vector databases (like ChromaDB or Faiss compiled for mobile). If you can map a user’s local file directory into an embedded vector space and query it entirely via a quantized 1.5B or 3B parameter model on a phone's NPU, you have a viable open-source tool (or startup MVP) that business owners would absolutely pay for.
+
+claude prompts on docs on 4th account
+
+all file formats?
+
+crash when running
+
