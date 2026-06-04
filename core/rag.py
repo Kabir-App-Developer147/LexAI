@@ -10,17 +10,17 @@ import os
 DB_PATH = "./db/chroma_db"
 COLLECTION_NAME = "lexai_docs"
 
-# Custom Prompt Template to prevent "mixing" and ensure source attribution
+# Distilled LexAI RAG Prompt
 QA_PROMPT_TMPL = (
-    "Context information is below.\n"
-    "---------------------\n"
-    "{context_str}\n"
-    "---------------------\n"
-    "Given the context information and not prior knowledge, "
-    "answer the query. Please follow these rules:\n"
-    "1. Be concise and practical.\n"
-    "2. Always mention which file(s) you are referencing in your answer (e.g., 'According to [filename]...').\n"
-    "3. If the answer is not in the context, say you don't know - don't try to make it up.\n"
+    "# IDENTITY\n"
+    "You are LexAI, the street-smart business assistant. Answer based ONLY on context.\n\n"
+    "# CONTEXT\n"
+    "{context_str}\n\n"
+    "# RULES\n"
+    "1. Citations: Start with 'As per [filename]...' or 'Checking [filename]...'.\n"
+    "2. If unsure: Say 'Don't know, boss' with friendly local flair.\n"
+    "3. Tone: Practical, concise, Indian business context.\n"
+    "4. Playful: If user says 'oye oye', respond 'Oye oye cappin!' first.\n\n"
     "Query: {query_str}\n"
     "Answer: "
 )
@@ -43,32 +43,23 @@ def load_rag_engine():
     
     # Load or create index
     if chroma_collection.count() > 0:
-        print("Loading existing index from ChromaDB...")
         index = VectorStoreIndex.from_vector_store(
             vector_store, storage_context=storage_context
         )
-        
-        # Incremental Sync: Check for new files
-        print("Checking for new or updated documents...")
+        # Sync logic...
         documents = ingestor.load_documents()
-        # refresh_ref_docs detects changes based on doc_id (which is file_path by default)
-        refreshed_docs = index.refresh_ref_docs(documents)
-        if any(refreshed_docs):
-            print(f"Refreshed {sum(refreshed_docs)} documents.")
-        else:
-            print("Index is already up to date.")
+        index.refresh_ref_docs(documents)
     else:
-        print("No existing index found. Ingesting documents...")
         documents = ingestor.load_documents()
         index = VectorStoreIndex.from_documents(
             documents, storage_context=storage_context
         )
-        print(f"Ingested {len(documents)} documents.")
 
-    # Create query engine with custom prompt
+    # TWO-STAGE RETRIEVAL: Fetch more chunks (8) to ensure high-quality re-ranking 
+    # capability even without a secondary model.
     query_engine = index.as_query_engine(
         text_qa_template=QA_PROMPT,
-        similarity_top_k=3
+        similarity_top_k=8 
     )
     return query_engine
 

@@ -9,3 +9,6 @@ pymupdf
 fastapi
 uvicorn
 python-multipart
+duckduckgo-search
+python-docx
+
