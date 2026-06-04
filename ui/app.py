@@ -13,10 +13,29 @@ import anyio
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.agent import create_lexai_agent
+from core.establishment import get_establishment
+from core.auth import get_auth_manager
+from core.synthetic import get_generator
 
 # Global instances
 agent = None
 DATA_DIR = "data"
+
+# ... (FastAPI setup)
+
+class TopicRequest(BaseModel):
+    topic: str
+
+@app.post("/generate-data")
+async def generate_training_data(req: TopicRequest):
+    """Generates synthetic Q&A pairs for fine-tuning."""
+    gen = get_generator()
+    pairs = await anyio.to_thread.run_sync(gen.generate_pairs, req.topic)
+    if not pairs:
+        raise HTTPException(status_code=500, detail="Failed to generate data")
+    
+    count = gen.save_dataset(pairs)
+    return {"message": f"Generated 10 pairs. Dataset now has {count} items.", "pairs": pairs}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,21 +51,60 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+class UserAuth(BaseModel):
+    username: str
+    password: str
+    role: str = "employee"
+
 class Question(BaseModel):
     text: str
     history: List[dict] = []
+    token: str = None # Pass token for role identification
+
+@app.post("/signup")
+async def signup(user: UserAuth):
+    auth = get_auth_manager()
+    success, msg = auth.signup(user.username, user.password, user.role)
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"message": msg}
+
+@app.post("/login")
+async def login(user: UserAuth):
+    auth = get_auth_manager()
+    token, msg = auth.login(user.username, user.password)
+    if not token:
+        raise HTTPException(status_code=401, detail=msg)
+    return {"token": token, "message": msg}
+
+# ... (greeting endpoint)
 
 @app.post("/ask")
 async def ask_question(q: Question):
     if not agent:
         raise HTTPException(status_code=503, detail="Agent not initialized")
     
+    # 1. Identify Role from Token
+    role = "employee"
+    if q.token:
+        try:
+            from core.auth import SECRET_KEY, ALGORITHM
+            from jose import jwt
+            payload = jwt.decode(q.token, SECRET_KEY, algorithms=[ALGORITHM])
+            role = payload.get("role", "employee")
+        except:
+            pass
+
+    # 2. Re-initialize agent if role changed (or pass role to chat if supported)
+    # For ReActAgent, we need to pass role during creation or manage multiple agents.
+    # To keep it simple and efficient, we'll create a role-specific agent call.
+    role_agent = await anyio.to_thread.run_sync(create_lexai_agent, role)
+    
     # Use the Agent to decide which tools to use
-    response = await anyio.to_thread.run_sync(agent.chat, q.text)
+    response = await anyio.to_thread.run_sync(role_agent.chat, q.text)
     answer = str(response)
     
-    # Source detection (simple heuristic based on response content or tool usage if possible)
-    # For now, we'll label it "Agent" as it might use multiple sources
+    # Source detection
     source = "Agent"
     if "Source: [" in answer: source = "Internet"
     elif "As per [" in answer or "Checking [" in answer: source = "RAG"
@@ -127,6 +185,54 @@ async def home():
         </style>
     </head>
     <body class="bg-slate-50 text-slate-900 h-screen flex flex-col overflow-hidden">
+
+        <!-- Auth Screen (Overlay) -->
+        <div id="auth-screen" class="fixed inset-0 z-[100] bg-slate-50 flex flex-col items-center justify-center p-8 safe-top safe-bottom">
+            <div class="w-full max-w-md space-y-8 animate-in fade-in zoom-in duration-500">
+                <div class="text-center space-y-4">
+                    <div class="bg-indigo-600 w-20 h-20 rounded-3xl flex items-center justify-center mx-auto shadow-2xl shadow-indigo-200">
+                        <i data-lucide="lock" class="w-10 h-10 text-white"></i>
+                    </div>
+                    <h2 class="text-3xl font-extrabold text-slate-900">Secure LexAI</h2>
+                    <p class="text-slate-500 font-medium">Your business data, locally protected.</p>
+                </div>
+
+                <div class="bg-white p-8 rounded-3xl shadow-xl shadow-slate-200 border border-slate-100 space-y-6">
+                    <div class="space-y-4">
+                        <div class="space-y-2">
+                            <label class="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Username</label>
+                            <input type="text" id="auth-username" class="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-base" placeholder="Enter username">
+                        </div>
+                        <div class="space-y-2">
+                            <label class="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Password</label>
+                            <input type="password" id="auth-password" class="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-base" placeholder="••••••••">
+                        </div>
+                        <div class="space-y-2">
+                            <label class="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Role (for Signup)</label>
+                            <select id="auth-role" class="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-base">
+                                <option value="employee">Employee</option>
+                                <option value="sales_staff">Sales Staff</option>
+                                <option value="accountant">Accountant</option>
+                                <option value="owner">Owner</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col gap-3">
+                        <button onclick="handleAuth('login')" id="login-btn" class="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-indigo-100 active:scale-95 transition-all">
+                            Login to Establishment
+                        </button>
+                        <button onclick="handleAuth('signup')" id="signup-btn" class="w-full bg-slate-100 text-slate-600 py-4 rounded-2xl font-bold active:scale-95 transition-all">
+                            Create Local Account
+                        </button>
+                    </div>
+                    
+                    <p id="auth-error" class="text-center text-sm font-semibold text-rose-500 hidden animate-pulse"></p>
+                </div>
+                
+                <p class="text-center text-[10px] text-slate-400 uppercase tracking-[0.2em] font-bold">100% Local Authentication</p>
+            </div>
+        </div>
 
         <!-- Mobile Header -->
         <header class="bg-white/80 backdrop-blur-md border-b border-slate-100 px-6 py-4 flex items-center justify-between sticky top-0 z-30 safe-top">
@@ -215,7 +321,68 @@ async def home():
             const userInput = document.getElementById('user-input');
             const welcomeScreen = document.getElementById('welcome-screen');
             const fileList = document.getElementById('file-list');
-            let conversationHistory = [];
+            
+            // AUTH & PERFORMANCE
+            let conversationHistory = JSON.parse(localStorage.getItem('lexai_history') || '[]');
+            let authToken = localStorage.getItem('lexai_token');
+
+            // Initialize App
+            if (authToken) {
+                document.getElementById('auth-screen').classList.add('hidden');
+                initApp();
+            }
+
+            async function handleAuth(type) {
+                const u = document.getElementById('auth-username').value;
+                const p = document.getElementById('auth-password').value;
+                const err = document.getElementById('auth-error');
+                
+                if (!u || !p) {
+                    err.innerText = "Fill all fields, boss!";
+                    err.classList.remove('hidden');
+                    return;
+                }
+
+                try {
+                    const res = await fetch(`/${type}`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({username: u, password: p})
+                    });
+                    const data = await res.json();
+                    
+                    if (res.ok) {
+                        if (type === 'login') {
+                            localStorage.setItem('lexai_token', data.token);
+                            document.getElementById('auth-screen').classList.add('hidden');
+                            initApp();
+                        } else {
+                            err.innerText = "Account created! Now login.";
+                            err.classList.remove('hidden');
+                            err.className = "text-center text-sm font-semibold text-emerald-500";
+                        }
+                    } else {
+                        err.innerText = data.detail || "Auth failed";
+                        err.classList.remove('hidden');
+                    }
+                } catch (e) {
+                    err.innerText = "Connection error";
+                    err.classList.remove('hidden');
+                }
+            }
+
+            function initApp() {
+                if (conversationHistory.length > 0) {
+                    conversationHistory.forEach(msg => addMessage(msg.content, msg.role === 'assistant'));
+                } else {
+                    fetch('/greeting')
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.greeting) addMessage(data.greeting, true);
+                        });
+                }
+                fetchFiles();
+            }
 
             function switchTab(tab) {
                 const isChat = tab === 'chat';
@@ -231,8 +398,19 @@ async def home():
             }
 
             async function fetchFiles() {
-                const res = await fetch('/files');
-                const files = await res.json();
+                // INSTANT UI: Show cached files first, then update
+                const cached = localStorage.getItem('lexai_files');
+                if (cached) renderFiles(JSON.parse(cached));
+
+                try {
+                    const res = await fetch('/files');
+                    const files = await res.json();
+                    localStorage.setItem('lexai_files', JSON.stringify(files));
+                    renderFiles(files);
+                } catch (e) {}
+            }
+
+            function renderFiles(files) {
                 fileList.innerHTML = files.map(f => `
                     <div class="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group">
                         <div class="flex items-center gap-3">
@@ -276,7 +454,7 @@ async def home():
                 
                 const content = `
                     <div class="max-w-[85%] ${isAi ? 'bg-white text-slate-800' : 'bg-indigo-600 text-white'} p-4 rounded-2xl shadow-sm border ${isAi ? 'border-slate-100' : 'border-indigo-500'}">
-                        <div class="text-[15px] leading-relaxed">${text.replace(/\\n/g, '<br>')}</div>
+                        <div class="text-[15px] max-w-full overflow-x-auto leading-relaxed">${text.replace(/\\n/g, '<br>')}</div>
                         ${sourceTag}
                     </div>
                 `;
@@ -321,23 +499,42 @@ async def home():
                     document.getElementById('typing-indicator').remove();
                     addMessage(data.answer, true, data.source);
                     conversationHistory = data.history;
+                    localStorage.setItem('lexai_history', JSON.stringify(conversationHistory));
                 } catch (e) {
-                    document.getElementById('typing-indicator').remove();
+                    if (document.getElementById('typing-indicator')) {
+                        document.getElementById('typing-indicator').remove();
+                    }
                     addMessage("Technical glitch, yaar. Try again?", true);
                 }
             }
 
             function handleKey(e) {
-                if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) {
-                    e.preventDefault();
-                    sendMessage();
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    // Prevent default on mobile to prevent keyboard jumping
+                    if (window.innerWidth > 768) {
+                        e.preventDefault();
+                        sendMessage();
+                    }
                 }
             }
 
             function newChat() {
                 conversationHistory = [];
+                localStorage.removeItem('lexai_history');
                 chatMessages.innerHTML = '';
                 if (welcomeScreen) welcomeScreen.style.display = 'block';
+            }
+
+            // Load existing history on start
+            if (conversationHistory.length > 0) {
+                conversationHistory.forEach(msg => addMessage(msg.content, msg.role === 'assistant'));
+            } else {
+                // Fetch localized greeting for new session
+                fetch('/greeting')
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.greeting) addMessage(data.greeting, true);
+                    });
             }
         </script>
     </body>
