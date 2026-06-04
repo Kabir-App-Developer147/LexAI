@@ -9,3 +9,6 @@ pythonllm = LLMManager()
 And in ingest.py:
 pythoningestor = DocumentIngestor()
 These create instances at import time. When another file does from core.ingest import ingestor, it immediately creates a DocumentIngestor object. For now it's fine, but it'll cause problems later. Use lazy initialization instead
+
+IMPORVE
+If you haven't already, look into RAG (Retrieval-Augmented Generation) operating strictly on local SQLite or vector databases (like ChromaDB or Faiss compiled for mobile). If you can map a user’s local file directory into an embedded vector space and query it entirely via a quantized 1.5B or 3B parameter model on a phone's NPU, you have a viable open-source tool (or startup MVP) that business owners would absolutely pay for.
